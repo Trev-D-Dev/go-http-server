@@ -29,9 +29,12 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) numRequestsHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(200)
-	_, err := w.Write([]byte(fmt.Sprintf("Hits: %v\n", cfg.fileserverHits.Load())))
+
+	htmlString := fmt.Sprintf("<html><body><h1>Welcome, Chirpy Admin</h1><p>Chirpy has been visited %d times!</p></body></html>", cfg.fileserverHits.Load())
+
+	_, err := w.Write([]byte(htmlString))
 	if err != nil {
 		fmt.Printf("error occured writing body: %v\n", err)
 		return
@@ -61,9 +64,9 @@ func main() {
 	sMux := http.NewServeMux()
 	sMux.Handle("/app/", apiCfg.middlewareMetricsInc(handler))
 	sMux.Handle("/assets/", http.FileServer(http.Dir(".")))
-	sMux.HandleFunc("GET /healthz", readinessHandler)
-	sMux.HandleFunc("GET /metrics", apiCfg.numRequestsHandler)
-	sMux.HandleFunc("POST /reset", apiCfg.resetRequests)
+	sMux.HandleFunc("GET /api/healthz", readinessHandler)
+	sMux.HandleFunc("GET /admin/metrics", apiCfg.numRequestsHandler)
+	sMux.HandleFunc("POST /admin/reset", apiCfg.resetRequests)
 
 	server := http.Server{
 		Addr:    ":8080",
