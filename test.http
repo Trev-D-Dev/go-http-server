@@ -1,0 +1,24 @@
+### Test valid chirp
+POST http://localhost:8080/api/validate_chirp
+Content-Type: application/json
+
+{
+    "body": "This is a short chirp"
+}
+
+### Test chirp that's too long
+POST http://localhost:8080/api/validate_chirp
+Content-Type: application/json
+
+{
+    "body": "This is a very long chirp that exceeds the 140 character limit. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris."
+}
+
+## Test invalid JSON
+### Test with missing field
+POST http://localhost:8080/api/validate_chirp
+Content-Type: application/json
+
+{
+  "notbody": "This should cause an error"
+}
