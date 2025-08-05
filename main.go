@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync/atomic"
 )
 
@@ -75,6 +76,8 @@ func errorHandler(w http.ResponseWriter, errMsg string) {
 }
 
 func (cfg *apiConfig) validateChirp(w http.ResponseWriter, r *http.Request) {
+	bannedWords := [6]string{"kerfuffle", "sharbert", "fornax", "Kerfuffle", "Sharbert", "Fornax"}
+
 	type parameters struct {
 		Body string `json:"body"`
 	}
@@ -89,13 +92,21 @@ func (cfg *apiConfig) validateChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	} else {
 		type returnVal struct {
-			Valid bool `json:"valid"`
+			CleanedBody string `json:"cleaned_body"`
 		}
 
 		if len(params.Body) <= 140 && len(params.Body) != 0 {
-			retJson := returnVal{
-				Valid: true,
+
+			for i := range bannedWords {
+				if strings.Contains(params.Body, bannedWords[i]) {
+					params.Body = strings.Replace(params.Body, bannedWords[i], "****", -1)
+				}
 			}
+
+			retJson := returnVal{
+				CleanedBody: params.Body,
+			}
+
 			dat, err := json.Marshal(retJson)
 			if err != nil {
 				log.Printf("Error marshalling JSON: %s", err)
