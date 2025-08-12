@@ -9,15 +9,18 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/Trev-D-Dev/go-http-server/internal/database"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
-	dbQueries      *database.Queries
+	db             *database.Queries
+	platform       string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -51,7 +54,16 @@ func (cfg *apiConfig) numRequestsHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (cfg *apiConfig) resetRequests(w http.ResponseWriter, r *http.Request) {
+	if cfg.platform != "dev" {
+		w.Header().Set("Content-Type", "application/json")
+		errMsg := "403 Forbidden"
+		errorHandler(w, errMsg)
+		return
+	}
+
 	cfg.fileserverHits = atomic.Int32{}
+
+	cfg.db.ResetUsers(r.Context())
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(200)
@@ -77,6 +89,13 @@ func errorHandler(w http.ResponseWriter, errMsg string) {
 		w.WriteHeader(500)
 		return
 	}
+
+	if errMsg == "403 Forbidden" {
+		w.WriteHeader(403)
+		w.Write(dat)
+		return
+	}
+
 	w.WriteHeader(400)
 	w.Write(dat)
 }
@@ -132,18 +151,71 @@ func (cfg *apiConfig) validateChirp(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email string `json:"email"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error decoding params: %v", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	type User struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email     string    `json:"email"`
+	}
+
+	user, err := cfg.db.CreateUser(r.Context(), params.Email)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error creating user: %v", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	userJson := User{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	}
+
+	dat, err := json.Marshal(userJson)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error marsalling json: %v", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	w.Write(dat)
+}
+
 func main() {
 
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
+	platform := os.Getenv("PLATFORM")
 
 	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		fmt.Printf("error occured: %v\n", err)
+		os.Exit(1)
+	}
 
 	dbQueries := database.New(db)
 
 	apiCfg := apiConfig{
 		fileserverHits: atomic.Int32{},
-		dbQueries:      dbQueries,
+		db:             dbQueries,
+		platform:       platform,
 	}
 
 	handler := http.StripPrefix("/app/", http.FileServer(http.Dir(".")))
@@ -155,6 +227,7 @@ func main() {
 	sMux.HandleFunc("GET /admin/metrics", apiCfg.numRequestsHandler)
 	sMux.HandleFunc("POST /admin/reset", apiCfg.resetRequests)
 	sMux.HandleFunc("POST /api/validate_chirp", apiCfg.validateChirp)
+	sMux.HandleFunc("POST /api/users", apiCfg.createUser)
 
 	server := http.Server{
 		Addr:    ":8080",
