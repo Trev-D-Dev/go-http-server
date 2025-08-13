@@ -100,6 +100,7 @@ func errorHandler(w http.ResponseWriter, errMsg string) {
 	w.Write(dat)
 }
 
+/*
 func (cfg *apiConfig) validateChirp(w http.ResponseWriter, r *http.Request) {
 	bannedWords := [6]string{"kerfuffle", "sharbert", "fornax", "Kerfuffle", "Sharbert", "Fornax"}
 
@@ -149,7 +150,7 @@ func (cfg *apiConfig) validateChirp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-}
+}*/
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
@@ -198,6 +199,78 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	w.Write(dat)
 }
 
+func (cfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
+	bannedWords := [6]string{"kerfuffle", "sharbert", "fornax", "Kerfuffle", "Sharbert", "Fornax"}
+
+	type parameters struct {
+		Body   string    `json:"body"`
+		UserID uuid.UUID `json:"user_id"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Error decoding params: %v", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	chirpLen := len(params.Body)
+
+	if chirpLen == 0 {
+		errorHandler(w, "Invalid chirp")
+		return
+	} else if chirpLen > 140 {
+		errorHandler(w, "Chirp is too long")
+		return
+	}
+
+	type Chirp struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		UserID    uuid.UUID `json:"user_id"`
+	}
+
+	for i := range bannedWords {
+		if strings.Contains(params.Body, bannedWords[i]) {
+			params.Body = strings.Replace(params.Body, bannedWords[i], "****", -1)
+		}
+	}
+
+	chirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
+		Body:   params.Body,
+		UserID: params.UserID,
+	})
+	if err != nil {
+		errMsg := fmt.Sprintf("Error creating chirp: %v\n", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	chirpJson := Chirp{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
+	}
+
+	dat, err := json.Marshal(chirpJson)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error marshalling json: %v\n", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	w.Write(dat)
+}
+
 func main() {
 
 	godotenv.Load()
@@ -226,8 +299,9 @@ func main() {
 	sMux.HandleFunc("GET /api/healthz", readinessHandler)
 	sMux.HandleFunc("GET /admin/metrics", apiCfg.numRequestsHandler)
 	sMux.HandleFunc("POST /admin/reset", apiCfg.resetRequests)
-	sMux.HandleFunc("POST /api/validate_chirp", apiCfg.validateChirp)
+	//sMux.HandleFunc("POST /api/validate_chirp", apiCfg.validateChirp)
 	sMux.HandleFunc("POST /api/users", apiCfg.createUser)
+	sMux.HandleFunc("POST /api/chirps", apiCfg.chirpsHandler)
 
 	server := http.Server{
 		Addr:    ":8080",
