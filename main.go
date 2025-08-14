@@ -102,6 +102,10 @@ func errorHandler(w http.ResponseWriter, errMsg string) {
 		w.WriteHeader(403)
 		w.Write(dat)
 		return
+	} else if errMsg == "404 Chirp Not Found" {
+		w.WriteHeader(404)
+		w.Write(dat)
+		return
 	}
 
 	w.WriteHeader(400)
@@ -302,6 +306,42 @@ func (cfg *apiConfig) allChirpsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(dat)
 }
 
+func (cfg *apiConfig) singleChirpHandler(w http.ResponseWriter, r *http.Request) {
+	chirpID := r.PathValue("chirpID")
+
+	chirpUUID, err := uuid.Parse(chirpID)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error parsing UUID: %v\n", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	dbChirp, err := cfg.db.GetChirp(r.Context(), chirpUUID)
+	if err != nil {
+		errorHandler(w, "404 Chirp Not Found")
+		return
+	}
+
+	chirp := Chirp{
+		ID:        dbChirp.ID,
+		CreatedAt: dbChirp.CreatedAt,
+		UpdatedAt: dbChirp.UpdatedAt,
+		Body:      dbChirp.Body,
+		UserID:    dbChirp.UserID,
+	}
+
+	dat, err := json.Marshal(chirp)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error marshalling JSON: %v\n", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	w.Write(dat)
+}
+
 func main() {
 
 	godotenv.Load()
@@ -334,6 +374,7 @@ func main() {
 	sMux.HandleFunc("POST /api/users", apiCfg.createUser)
 	sMux.HandleFunc("POST /api/chirps", apiCfg.chirpsHandler)
 	sMux.HandleFunc("GET /api/chirps", apiCfg.allChirpsHandler)
+	sMux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.singleChirpHandler)
 
 	server := http.Server{
 		Addr:    ":8080",
