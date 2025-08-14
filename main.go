@@ -23,6 +23,14 @@ type apiConfig struct {
 	platform       string
 }
 
+type Chirp struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body      string    `json:"body"`
+	UserID    uuid.UUID `json:"user_id"`
+}
+
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg.fileserverHits.Add(1)
@@ -227,14 +235,6 @@ func (cfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type Chirp struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Body      string    `json:"body"`
-		UserID    uuid.UUID `json:"user_id"`
-	}
-
 	for i := range bannedWords {
 		if strings.Contains(params.Body, bannedWords[i]) {
 			params.Body = strings.Replace(params.Body, bannedWords[i], "****", -1)
@@ -271,6 +271,37 @@ func (cfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(dat)
 }
 
+func (cfg *apiConfig) allChirpsHandler(w http.ResponseWriter, r *http.Request) {
+	dbChirps, err := cfg.db.GetChirps(r.Context())
+	if err != nil {
+		errMsg := fmt.Sprintf("Error retrieving chirps: %v\n", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	chirps := []Chirp{}
+	for _, dbChirp := range dbChirps {
+		chirps = append(chirps, Chirp{
+			ID:        dbChirp.ID,
+			CreatedAt: dbChirp.CreatedAt,
+			UpdatedAt: dbChirp.UpdatedAt,
+			Body:      dbChirp.Body,
+			UserID:    dbChirp.UserID,
+		})
+	}
+
+	dat, err := json.Marshal(chirps)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error marshalling JSON: %v\n", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	w.Write(dat)
+}
+
 func main() {
 
 	godotenv.Load()
@@ -302,6 +333,7 @@ func main() {
 	//sMux.HandleFunc("POST /api/validate_chirp", apiCfg.validateChirp)
 	sMux.HandleFunc("POST /api/users", apiCfg.createUser)
 	sMux.HandleFunc("POST /api/chirps", apiCfg.chirpsHandler)
+	sMux.HandleFunc("GET /api/chirps", apiCfg.allChirpsHandler)
 
 	server := http.Server{
 		Addr:    ":8080",
