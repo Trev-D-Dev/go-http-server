@@ -342,6 +342,10 @@ func (cfg *apiConfig) singleChirpHandler(w http.ResponseWriter, r *http.Request)
 	w.Write(dat)
 }
 
+func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
+
+}
+
 func main() {
 
 	godotenv.Load()
