@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Trev-D-Dev/go-http-server/internal/auth"
 	"github.com/Trev-D-Dev/go-http-server/internal/database"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -98,17 +99,19 @@ func errorHandler(w http.ResponseWriter, errMsg string) {
 		return
 	}
 
-	if errMsg == "403 Forbidden" {
+	switch errMsg {
+	case "403 Forbidden":
 		w.WriteHeader(403)
-		w.Write(dat)
-		return
-	} else if errMsg == "404 Chirp Not Found" {
+	case "404 Chirp Not Found":
 		w.WriteHeader(404)
-		w.Write(dat)
-		return
+	case "Error: Incorrect Email":
+		fallthrough
+	case "Error: Incorrect Password":
+		w.WriteHeader(401)
+	default:
+		w.WriteHeader(400)
 	}
 
-	w.WriteHeader(400)
 	w.Write(dat)
 }
 
@@ -343,7 +346,57 @@ func (cfg *apiConfig) singleChirpHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
 
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Error decoding params: %v", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	user, err := cfg.db.GetUserByEmail(r.Context(), params.Email)
+	if err != nil {
+		errorHandler(w, "Error: Incorrect Email")
+		return
+	}
+
+	err = auth.CheckPasswordHash(user.HashedPassword, params.Password)
+	if err != nil {
+		errorHandler(w, "Error: Incorrect Password")
+		return
+	}
+
+	type User struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email     string    `json:"email"`
+	}
+
+	userJson := User{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	}
+
+	dat, err := json.Marshal(userJson)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error marshalling json: %v", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	w.Write(dat)
 }
 
 func main() {
@@ -379,6 +432,7 @@ func main() {
 	sMux.HandleFunc("POST /api/chirps", apiCfg.chirpsHandler)
 	sMux.HandleFunc("GET /api/chirps", apiCfg.allChirpsHandler)
 	sMux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.singleChirpHandler)
+	sMux.HandleFunc("POST /api/login", apiCfg.loginHandler)
 
 	server := http.Server{
 		Addr:    ":8080",
