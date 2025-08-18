@@ -169,7 +169,8 @@ func (cfg *apiConfig) validateChirp(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Email string `json:"email"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -188,7 +189,17 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		Email     string    `json:"email"`
 	}
 
-	user, err := cfg.db.CreateUser(r.Context(), params.Email)
+	hashPass, err := auth.HashPassword(params.Password)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error hashing password: %v", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	user, err := cfg.db.CreateUser(r.Context(), database.CreateUserParams{
+		Email:          params.Email,
+		HashedPassword: hashPass,
+	})
 	if err != nil {
 		errMsg := fmt.Sprintf("Error creating user: %v", err)
 		errorHandler(w, errMsg)
