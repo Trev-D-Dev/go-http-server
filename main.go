@@ -254,9 +254,7 @@ func (cfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i := range bannedWords {
-		if strings.Contains(params.Body, bannedWords[i]) {
-			params.Body = strings.Replace(params.Body, bannedWords[i], "****", -1)
-		}
+		params.Body = strings.Replace(params.Body, bannedWords[i], "****", -1)
 	}
 
 	chirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{

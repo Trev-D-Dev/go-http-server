@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -75,5 +76,74 @@ func TestValidateJWT_ExpiredToken(t *testing.T) {
 	_, err = ValidateJWT(expiredToken, secret)
 	if err == nil {
 		t.Error("Expected error for expired token, but got none")
+	}
+}
+
+func TestGetBearerToken(t *testing.T) {
+
+	tests := []struct {
+		name        string
+		tokenString string
+		wantErr     bool
+		wantToken   string
+	}{
+		{
+			name:        "Valid token",
+			tokenString: "Bearer THISISATOKEN",
+			wantErr:     false,
+			wantToken:   "THISISATOKEN",
+		},
+		{
+			name:        "Valid token w/ spaces",
+			tokenString: "  Bearer  THISTOKENHASSPACES  ",
+			wantErr:     false,
+			wantToken:   "THISTOKENHASSPACES",
+		},
+		{
+			name:        "Valid token w/ no Bearer",
+			tokenString: "Basic THISHASDIFFERENTWORD",
+			wantErr:     false,
+			wantToken:   "THISHASDIFFERENTWORD",
+		},
+		{
+			name:        "Invalid token",
+			tokenString: "Bearer",
+			wantErr:     true,
+			wantToken:   "",
+		},
+		{
+			name:        "Invalid token w/ spaces",
+			tokenString: "  Bearer   ",
+			wantErr:     true,
+			wantToken:   "",
+		},
+		{
+			name:        "Empty token",
+			tokenString: "",
+			wantErr:     true,
+			wantToken:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest("", "", http.NoBody)
+			if err != nil {
+				t.Fatalf("failed to create test request: %v", err)
+			}
+
+			req.Header.Set("Authorization", tt.tokenString)
+
+			tokenStr, err := GetBearerToken(req.Header)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetBearerToken() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tokenStr != tt.wantToken {
+				t.Errorf("GetBearerToken() = %v, want %v", tokenStr, tt.wantToken)
+			}
+		})
 	}
 }
