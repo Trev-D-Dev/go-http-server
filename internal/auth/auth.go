@@ -86,11 +86,7 @@ func GetBearerToken(headers http.Header) (string, error) {
 
 	authString := authSlice[0]
 
-	tokenString := authString[6:]
-
-	tokenString = strings.Trim(tokenString, " ")
-
-	println(tokenString)
+	tokenString := strings.Trim(authString, " ")
 
 	spcIdx := strings.Index(tokenString, " ")
 	if spcIdx == -1 {
@@ -98,7 +94,9 @@ func GetBearerToken(headers http.Header) (string, error) {
 		return "", returnErr
 	}
 
-	tokenString = tokenString[spcIdx:]
+	tokenString = tokenString[(spcIdx + 1):]
+
+	tokenString = strings.Trim(tokenString, " ")
 
 	return tokenString, nil
 }
