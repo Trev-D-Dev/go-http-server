@@ -22,6 +22,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
 	platform       string
+	secret         string
 }
 
 type Chirp struct {
@@ -104,6 +105,8 @@ func errorHandler(w http.ResponseWriter, errMsg string) {
 		w.WriteHeader(403)
 	case "404 Chirp Not Found":
 		w.WriteHeader(404)
+	case "unauthorized to post chirp":
+		fallthrough
 	case "Error: Incorrect Email":
 		fallthrough
 	case "Error: Incorrect Password":
@@ -229,8 +232,7 @@ func (cfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 	bannedWords := [6]string{"kerfuffle", "sharbert", "fornax", "Kerfuffle", "Sharbert", "Fornax"}
 
 	type parameters struct {
-		Body   string    `json:"body"`
-		UserID uuid.UUID `json:"user_id"`
+		Body string `json:"body"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -239,6 +241,20 @@ func (cfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		errMsg := fmt.Sprintf("Error decoding params: %v", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error retrieving token: %v", err)
+		errorHandler(w, errMsg)
+		return
+	}
+
+	uid, err := auth.ValidateJWT(token, cfg.secret)
+	if err != nil {
+		errMsg := "unauthorized to post chirp"
 		errorHandler(w, errMsg)
 		return
 	}
@@ -259,7 +275,7 @@ func (cfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 
 	chirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
 		Body:   params.Body,
-		UserID: params.UserID,
+		UserID: uid,
 	})
 	if err != nil {
 		errMsg := fmt.Sprintf("Error creating chirp: %v\n", err)
@@ -356,8 +372,9 @@ func (cfg *apiConfig) singleChirpHandler(w http.ResponseWriter, r *http.Request)
 
 func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Password string `json:"password"`
-		Email    string `json:"email"`
+		Password         string `json:"password"`
+		Email            string `json:"email"`
+		ExpiresInSeconds *int   `json:"expires_in_seconds"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -368,6 +385,17 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 		errMsg := fmt.Sprintf("Error decoding params: %v", err)
 		errorHandler(w, errMsg)
 		return
+	}
+
+	secondsInHour := 3600
+
+	if params.ExpiresInSeconds == nil {
+		params.ExpiresInSeconds = &secondsInHour
+	} else {
+		expTime := *params.ExpiresInSeconds
+		if expTime > secondsInHour {
+			params.ExpiresInSeconds = &secondsInHour
+		}
 	}
 
 	user, err := cfg.db.GetUserByEmail(r.Context(), params.Email)
@@ -387,6 +415,16 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 		CreatedAt time.Time `json:"created_at"`
 		UpdatedAt time.Time `json:"updated_at"`
 		Email     string    `json:"email"`
+		Token     string    `json:"token"`
+	}
+
+	duration := time.Duration(*params.ExpiresInSeconds) * time.Second
+
+	token, err := auth.MakeJWT(user.ID, cfg.secret, duration)
+	if err != nil {
+		errMsg := fmt.Sprintf("error creating token: %v", err)
+		errorHandler(w, errMsg)
+		return
 	}
 
 	userJson := User{
@@ -394,6 +432,7 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
+		Token:     token,
 	}
 
 	dat, err := json.Marshal(userJson)
@@ -411,10 +450,9 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 
 	godotenv.Load()
-	dbURL := os.Getenv("DB_URL")
 	platform := os.Getenv("PLATFORM")
 
-	db, err := sql.Open("postgres", dbURL)
+	db, err := sql.Open("postgres", os.Getenv("DB_URL"))
 	if err != nil {
 		fmt.Printf("error occured: %v\n", err)
 		os.Exit(1)
@@ -426,6 +464,7 @@ func main() {
 		fileserverHits: atomic.Int32{},
 		db:             dbQueries,
 		platform:       platform,
+		secret:         os.Getenv("SECRET"),
 	}
 
 	handler := http.StripPrefix("/app/", http.FileServer(http.Dir(".")))
