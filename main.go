@@ -471,6 +471,12 @@ func (cfg *apiConfig) refreshHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errorHandler(w, "invalid token")
 		return
+	} else if refToken.RevokedAt.Valid {
+		http.Error(w, "refresh token revoked", http.StatusUnauthorized)
+		return
+	} else if time.Now().UTC().After(refToken.ExpiresAt) {
+		http.Error(w, "refresh token expired", http.StatusUnauthorized)
+		return
 	}
 
 	newToken, err := auth.MakeJWT(refToken.UserID, cfg.secret, time.Hour)
