@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -67,7 +66,7 @@ func (cfg *apiConfig) resetRequests(w http.ResponseWriter, r *http.Request) {
 	if cfg.platform != "dev" {
 		w.Header().Set("Content-Type", "application/json")
 		errMsg := "403 Forbidden"
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 403)
 		return
 	}
 
@@ -84,94 +83,6 @@ func (cfg *apiConfig) resetRequests(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func errorHandler(w http.ResponseWriter, errMsg string) {
-	type errorResponse struct {
-		Error string `json:"error"`
-	}
-
-	errResp := errorResponse{
-		Error: errMsg,
-	}
-
-	dat, err := json.Marshal(errResp)
-	if err != nil {
-		log.Printf("Error marshalling JSON: %s", err)
-		w.WriteHeader(500)
-		return
-	}
-
-	switch errMsg {
-	case "403 Forbidden":
-		w.WriteHeader(403)
-	case "404 Chirp Not Found":
-		w.WriteHeader(404)
-	case "invalid token":
-		fallthrough
-	case "unauthorized to post chirp":
-		fallthrough
-	case "Error: Incorrect Email":
-		fallthrough
-	case "Error: Incorrect Password":
-		w.WriteHeader(401)
-	default:
-		w.WriteHeader(400)
-	}
-
-	w.Write(dat)
-}
-
-/*
-func (cfg *apiConfig) validateChirp(w http.ResponseWriter, r *http.Request) {
-	bannedWords := [6]string{"kerfuffle", "sharbert", "fornax", "Kerfuffle", "Sharbert", "Fornax"}
-
-	type parameters struct {
-		Body string `json:"body"`
-	}
-
-	decoder := json.NewDecoder(r.Body)
-	params := parameters{}
-	err := decoder.Decode(&params)
-
-	if err != nil {
-		errMsg := fmt.Sprintf("Error decoding params: %v", err)
-		errorHandler(w, errMsg)
-		return
-	} else {
-		type returnVal struct {
-			CleanedBody string `json:"cleaned_body"`
-		}
-
-		if len(params.Body) <= 140 && len(params.Body) != 0 {
-
-			for i := range bannedWords {
-				if strings.Contains(params.Body, bannedWords[i]) {
-					params.Body = strings.Replace(params.Body, bannedWords[i], "****", -1)
-				}
-			}
-
-			retJson := returnVal{
-				CleanedBody: params.Body,
-			}
-
-			dat, err := json.Marshal(retJson)
-			if err != nil {
-				log.Printf("Error marshalling JSON: %s", err)
-				w.WriteHeader(500)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(200)
-			w.Write(dat)
-		} else if len(params.Body) == 0 {
-			errorHandler(w, "Invalid chirp")
-			return
-		} else {
-			errorHandler(w, "Chirp is too long")
-			return
-		}
-	}
-}*/
-
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Email    string `json:"email"`
@@ -183,7 +94,7 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	err := decoder.Decode(&params)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error decoding params: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
@@ -197,7 +108,7 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	hashPass, err := auth.HashPassword(params.Password)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error hashing password: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
@@ -207,7 +118,7 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		errMsg := fmt.Sprintf("Error creating user: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
@@ -221,7 +132,7 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	dat, err := json.Marshal(userJson)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error marsalling json: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 500)
 		return
 	}
 
@@ -243,31 +154,31 @@ func (cfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		errMsg := fmt.Sprintf("Error decoding params: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
 	token, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error retrieving token: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
 	uid, err := auth.ValidateJWT(token, cfg.secret)
 	if err != nil {
 		errMsg := "unauthorized to post chirp"
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, http.StatusUnauthorized)
 		return
 	}
 
 	chirpLen := len(params.Body)
 
 	if chirpLen == 0 {
-		errorHandler(w, "Invalid chirp")
+		http.Error(w, "invalid chirp", 400)
 		return
 	} else if chirpLen > 140 {
-		errorHandler(w, "Chirp is too long")
+		http.Error(w, "chirp is too long", 400)
 		return
 	}
 
@@ -281,7 +192,7 @@ func (cfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		errMsg := fmt.Sprintf("Error creating chirp: %v\n", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
@@ -296,7 +207,7 @@ func (cfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 	dat, err := json.Marshal(chirpJson)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error marshalling json: %v\n", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 500)
 		return
 	}
 
@@ -309,7 +220,7 @@ func (cfg *apiConfig) allChirpsHandler(w http.ResponseWriter, r *http.Request) {
 	dbChirps, err := cfg.db.GetChirps(r.Context())
 	if err != nil {
 		errMsg := fmt.Sprintf("Error retrieving chirps: %v\n", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
@@ -327,7 +238,7 @@ func (cfg *apiConfig) allChirpsHandler(w http.ResponseWriter, r *http.Request) {
 	dat, err := json.Marshal(chirps)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error marshalling JSON: %v\n", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 500)
 		return
 	}
 
@@ -342,13 +253,13 @@ func (cfg *apiConfig) singleChirpHandler(w http.ResponseWriter, r *http.Request)
 	chirpUUID, err := uuid.Parse(chirpID)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error parsing UUID: %v\n", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
 	dbChirp, err := cfg.db.GetChirp(r.Context(), chirpUUID)
 	if err != nil {
-		errorHandler(w, "404 Chirp Not Found")
+		http.Error(w, "404 Chirp Not Found", 404)
 		return
 	}
 
@@ -363,7 +274,7 @@ func (cfg *apiConfig) singleChirpHandler(w http.ResponseWriter, r *http.Request)
 	dat, err := json.Marshal(chirp)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error marshalling JSON: %v\n", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 500)
 		return
 	}
 
@@ -384,19 +295,19 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		errMsg := fmt.Sprintf("Error decoding params: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
 	user, err := cfg.db.GetUserByEmail(r.Context(), params.Email)
 	if err != nil {
-		errorHandler(w, "Error: Incorrect Email")
+		http.Error(w, "error: incorrect email", 401)
 		return
 	}
 
 	err = auth.CheckPasswordHash(user.HashedPassword, params.Password)
 	if err != nil {
-		errorHandler(w, "Error: Incorrect Password")
+		http.Error(w, "error: incorrect password", 401)
 		return
 	}
 
@@ -414,14 +325,14 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 	token, err := auth.MakeJWT(user.ID, cfg.secret, duration)
 	if err != nil {
 		errMsg := fmt.Sprintf("error creating token: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
 	hexToken, err := auth.MakeRefreshToken()
 	if err != nil {
 		errMsg := fmt.Sprintf("Error creating hexToken: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
@@ -434,7 +345,7 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		errMsg := fmt.Sprintf("Error creating refresh token: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
@@ -450,7 +361,7 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 	dat, err := json.Marshal(userJson)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error marshalling json: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 500)
 		return
 	}
 
@@ -463,13 +374,13 @@ func (cfg *apiConfig) refreshHandler(w http.ResponseWriter, r *http.Request) {
 	token, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		errMsg := fmt.Sprintf("error retrieving token: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
 	refToken, err := cfg.db.GetRefreshByToken(r.Context(), token)
 	if err != nil {
-		errorHandler(w, "invalid token")
+		http.Error(w, "invalid token", http.StatusUnauthorized)
 		return
 	} else if refToken.RevokedAt.Valid {
 		http.Error(w, "refresh token revoked", http.StatusUnauthorized)
@@ -482,7 +393,7 @@ func (cfg *apiConfig) refreshHandler(w http.ResponseWriter, r *http.Request) {
 	newToken, err := auth.MakeJWT(refToken.UserID, cfg.secret, time.Hour)
 	if err != nil {
 		errMsg := fmt.Sprintf("error creating new token: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
@@ -497,7 +408,7 @@ func (cfg *apiConfig) refreshHandler(w http.ResponseWriter, r *http.Request) {
 	dat, err := json.Marshal(returnJson)
 	if err != nil {
 		errMsg := fmt.Sprintf("Error marshalling json: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 500)
 		return
 	}
 
@@ -510,14 +421,14 @@ func (cfg *apiConfig) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	token, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		errMsg := fmt.Sprintf("error retrieving token: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
 	err = cfg.db.RevokeRefreshToken(r.Context(), token)
 	if err != nil {
 		errMsg := fmt.Sprintf("error revoking token: %v", err)
-		errorHandler(w, errMsg)
+		http.Error(w, errMsg, 400)
 		return
 	}
 
