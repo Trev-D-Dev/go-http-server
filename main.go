@@ -22,6 +22,7 @@ type apiConfig struct {
 	db             *database.Queries
 	platform       string
 	secret         string
+	polkaKey       string
 }
 
 type Chirp struct {
@@ -572,9 +573,21 @@ func (cfg *apiConfig) upgradeUserHandler(w http.ResponseWriter, r *http.Request)
 		} `json:"data"`
 	}
 
+	apiKey, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		errMsg := fmt.Sprintf("error retrieving apiKey: %v", err)
+		http.Error(w, errMsg, http.StatusUnauthorized)
+		return
+	}
+
+	if cfg.polkaKey != apiKey {
+		http.Error(w, "incorrect api key", http.StatusUnauthorized)
+		return
+	}
+
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 
 	if err != nil {
 		errMsg := fmt.Sprintf("error decoding body: %v", err)
@@ -647,6 +660,7 @@ func main() {
 		db:             dbQueries,
 		platform:       platform,
 		secret:         os.Getenv("SECRET"),
+		polkaKey:       os.Getenv("POLKA_KEY"),
 	}
 
 	handler := http.StripPrefix("/app/", http.FileServer(http.Dir(".")))
