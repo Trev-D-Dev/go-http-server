@@ -510,6 +510,54 @@ func (cfg *apiConfig) passEmailChangeHandler(w http.ResponseWriter, r *http.Requ
 	w.Write(dat)
 }
 
+func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, r *http.Request) {
+	chirpID := r.PathValue("chirpID")
+
+	chirpUUID, err := uuid.Parse(chirpID)
+	if err != nil {
+		errMsg := fmt.Sprintf("error parsing chirpID: %v", err)
+		http.Error(w, errMsg, 400)
+		return
+	}
+
+	dbChirp, err := cfg.db.GetChirp(r.Context(), chirpUUID)
+	if err != nil {
+		http.Error(w, "404 Chirp Not Found", 404)
+		return
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		errMsg := fmt.Sprintf("error retrieving token: %v", err)
+		http.Error(w, errMsg, http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.secret)
+	if err != nil {
+		errMsg := fmt.Sprintf("error validating token: %v", err)
+		http.Error(w, errMsg, http.StatusUnauthorized)
+		return
+	}
+
+	if dbChirp.UserID != userID {
+		http.Error(w, "403 Forbidden", http.StatusForbidden)
+		return
+	}
+
+	err = cfg.db.DeleteChirp(r.Context(), database.DeleteChirpParams{
+		ID:     dbChirp.ID,
+		UserID: userID,
+	})
+	if err != nil {
+		http.Error(w, "Chirp deletion unsuccessful", 400)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(204)
+}
+
 func main() {
 
 	godotenv.Load()
@@ -547,6 +595,7 @@ func main() {
 	sMux.HandleFunc("POST /api/refresh", apiCfg.refreshHandler)
 	sMux.HandleFunc("POST /api/revoke", apiCfg.handleRevoke)
 	sMux.HandleFunc("PUT /api/users", apiCfg.passEmailChangeHandler)
+	sMux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.deleteChirp)
 
 	server := http.Server{
 		Addr:    ":8080",
