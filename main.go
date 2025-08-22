@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -220,6 +221,61 @@ func (cfg *apiConfig) chirpsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) allChirpsHandler(w http.ResponseWriter, r *http.Request) {
+
+	s := r.URL.Query().Get("author_id")
+	sortBy := r.URL.Query().Get("sort")
+
+	var dbChirps []database.Chirp
+
+	if s != "" {
+		uid, err := uuid.Parse(s)
+		if err != nil {
+			errMsg := fmt.Sprintf("error parsing uuid: %v", err)
+			http.Error(w, errMsg, 400)
+			return
+		}
+
+		dbChirps, err := cfg.db.GetChirpsFromUser(r.Context(), uid)
+		if err != nil {
+			errMsg := fmt.Sprintf("Error retrieving chirps: %v\n", err)
+			http.Error(w, errMsg, 400)
+			return
+		}
+
+		chirps := []Chirp{}
+		for _, dbChirp := range dbChirps {
+			chirps = append(chirps, Chirp{
+				ID:        dbChirp.ID,
+				CreatedAt: dbChirp.CreatedAt,
+				UpdatedAt: dbChirp.UpdatedAt,
+				Body:      dbChirp.Body,
+				UserID:    dbChirp.UserID,
+			})
+		}
+
+		if sortBy == "desc" {
+			sort.Slice(chirps, func(i, j int) bool {
+				if chirps[i].CreatedAt.Before(chirps[j].CreatedAt) {
+					return false
+				} else {
+					return true
+				}
+			})
+		}
+
+		dat, err := json.Marshal(chirps)
+		if err != nil {
+			errMsg := fmt.Sprintf("Error marshalling JSON: %v\n", err)
+			http.Error(w, errMsg, 500)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write(dat)
+		return
+	}
+
 	dbChirps, err := cfg.db.GetChirps(r.Context())
 	if err != nil {
 		errMsg := fmt.Sprintf("Error retrieving chirps: %v\n", err)
@@ -235,6 +291,16 @@ func (cfg *apiConfig) allChirpsHandler(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt: dbChirp.UpdatedAt,
 			Body:      dbChirp.Body,
 			UserID:    dbChirp.UserID,
+		})
+	}
+
+	if sortBy == "desc" {
+		sort.Slice(chirps, func(i, j int) bool {
+			if chirps[i].CreatedAt.Before(chirps[j].CreatedAt) {
+				return false
+			} else {
+				return true
+			}
 		})
 	}
 
