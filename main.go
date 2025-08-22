@@ -301,13 +301,13 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	user, err := cfg.db.GetUserByEmail(r.Context(), params.Email)
 	if err != nil {
-		http.Error(w, "error: incorrect email", 401)
+		http.Error(w, "error: incorrect email", http.StatusUnauthorized)
 		return
 	}
 
 	err = auth.CheckPasswordHash(user.HashedPassword, params.Password)
 	if err != nil {
-		http.Error(w, "error: incorrect password", 401)
+		http.Error(w, "error: incorrect password", http.StatusUnauthorized)
 		return
 	}
 
@@ -436,6 +436,80 @@ func (cfg *apiConfig) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
+func (cfg *apiConfig) passEmailChangeHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Error decoding params: %v", err)
+		http.Error(w, errMsg, 400)
+		return
+	}
+
+	hashPass, err := auth.HashPassword(params.Password)
+	if err != nil {
+		errMsg := fmt.Sprintf("error hashing password: %v", err)
+		http.Error(w, errMsg, 400)
+		return
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		errMsg := fmt.Sprintf("error retrieving token: %v", err)
+		http.Error(w, errMsg, http.StatusUnauthorized)
+		return
+	}
+
+	currentUserID, err := auth.ValidateJWT(token, cfg.secret)
+	if err != nil {
+		errMsg := fmt.Sprintf("error validating jwt: %v", err)
+		http.Error(w, errMsg, http.StatusUnauthorized)
+		return
+	}
+
+	updatedUser, err := cfg.db.UpdateUser(r.Context(), database.UpdateUserParams{
+		ID:             currentUserID,
+		Email:          params.Email,
+		HashedPassword: hashPass,
+	})
+	if err != nil {
+		errMsg := fmt.Sprintf("error updating user: %v", err)
+		http.Error(w, errMsg, 400)
+		return
+	}
+
+	type User struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email     string    `json:"email"`
+	}
+
+	returnUser := User{
+		ID:        updatedUser.ID,
+		CreatedAt: updatedUser.CreatedAt,
+		UpdatedAt: updatedUser.UpdatedAt,
+		Email:     updatedUser.Email,
+	}
+
+	dat, err := json.Marshal(returnUser)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error marshalling json: %v", err)
+		http.Error(w, errMsg, 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	w.Write(dat)
+}
+
 func main() {
 
 	godotenv.Load()
@@ -472,6 +546,7 @@ func main() {
 	sMux.HandleFunc("POST /api/login", apiCfg.loginHandler)
 	sMux.HandleFunc("POST /api/refresh", apiCfg.refreshHandler)
 	sMux.HandleFunc("POST /api/revoke", apiCfg.handleRevoke)
+	sMux.HandleFunc("PUT /api/users", apiCfg.passEmailChangeHandler)
 
 	server := http.Server{
 		Addr:    ":8080",
