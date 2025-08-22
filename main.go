@@ -99,10 +99,11 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type User struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Email     string    `json:"email"`
+		ID          uuid.UUID `json:"id"`
+		CreatedAt   time.Time `json:"created_at"`
+		UpdatedAt   time.Time `json:"updated_at"`
+		Email       string    `json:"email"`
+		IsChirpyRed bool      `json:"is_chirpy_red"`
 	}
 
 	hashPass, err := auth.HashPassword(params.Password)
@@ -123,10 +124,11 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userJson := User{
-		ID:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
+		ID:          user.ID,
+		CreatedAt:   user.CreatedAt,
+		UpdatedAt:   user.UpdatedAt,
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed,
 	}
 
 	dat, err := json.Marshal(userJson)
@@ -318,6 +320,7 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 		Email        string    `json:"email"`
 		Token        string    `json:"token"`
 		RefreshToken string    `json:"refresh_token"`
+		IsChirpyRed  bool      `json:"is_chirpy_red"`
 	}
 
 	duration := time.Hour
@@ -356,6 +359,7 @@ func (cfg *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 		Email:        user.Email,
 		Token:        token,
 		RefreshToken: refreshToken,
+		IsChirpyRed:  user.IsChirpyRed,
 	}
 
 	dat, err := json.Marshal(userJson)
@@ -485,17 +489,19 @@ func (cfg *apiConfig) passEmailChangeHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	type User struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Email     string    `json:"email"`
+		ID          uuid.UUID `json:"id"`
+		CreatedAt   time.Time `json:"created_at"`
+		UpdatedAt   time.Time `json:"updated_at"`
+		Email       string    `json:"email"`
+		IsChirpyRed bool      `json:"is_chirpy_red"`
 	}
 
 	returnUser := User{
-		ID:        updatedUser.ID,
-		CreatedAt: updatedUser.CreatedAt,
-		UpdatedAt: updatedUser.UpdatedAt,
-		Email:     updatedUser.Email,
+		ID:          updatedUser.ID,
+		CreatedAt:   updatedUser.CreatedAt,
+		UpdatedAt:   updatedUser.UpdatedAt,
+		Email:       updatedUser.Email,
+		IsChirpyRed: updatedUser.IsChirpyRed,
 	}
 
 	dat, err := json.Marshal(returnUser)
@@ -558,6 +564,71 @@ func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
+func (cfg *apiConfig) upgradeUserHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID string `json:"user_id"`
+		} `json:"data"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("error decoding body: %v", err)
+		http.Error(w, errMsg, 400)
+		return
+	}
+
+	if params.Event != "user.upgraded" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(204)
+		return
+	}
+
+	userID, err := uuid.Parse(params.Data.UserID)
+	if err != nil {
+		errMsg := fmt.Sprintf("error parsing userID: %v", err)
+		http.Error(w, errMsg, 400)
+		return
+	}
+
+	upgradedUser, err := cfg.db.UpgradeUser(r.Context(), userID)
+	if err != nil {
+		errMsg := fmt.Sprintf("error upgrading user: %v", err)
+		http.Error(w, errMsg, http.StatusNotFound)
+	}
+
+	type User struct {
+		ID          uuid.UUID `json:"id"`
+		CreatedAt   time.Time `json:"created_at"`
+		UpdatedAt   time.Time `json:"updated_at"`
+		Email       string    `json:"email"`
+		IsChirpyRed bool      `json:"is_chirpy_red"`
+	}
+
+	returnUser := User{
+		ID:          upgradedUser.ID,
+		CreatedAt:   upgradedUser.CreatedAt,
+		UpdatedAt:   upgradedUser.UpdatedAt,
+		Email:       upgradedUser.Email,
+		IsChirpyRed: upgradedUser.IsChirpyRed,
+	}
+
+	dat, err := json.Marshal(returnUser)
+	if err != nil {
+		errMsg := fmt.Sprintf("Error marshalling json: %v", err)
+		http.Error(w, errMsg, 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(204)
+	w.Write(dat)
+}
+
 func main() {
 
 	godotenv.Load()
@@ -596,6 +667,7 @@ func main() {
 	sMux.HandleFunc("POST /api/revoke", apiCfg.handleRevoke)
 	sMux.HandleFunc("PUT /api/users", apiCfg.passEmailChangeHandler)
 	sMux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.deleteChirp)
+	sMux.HandleFunc("POST /api/polka/webhooks", apiCfg.upgradeUserHandler)
 
 	server := http.Server{
 		Addr:    ":8080",
